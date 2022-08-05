@@ -1,0 +1,118 @@
+apiVersion: audit.k8s.io/v1 # This is required.
+kind: Policy
+# Don't generate audit events for all requests in RequestReceived stage.
+omitStages:
+  - "RequestReceived"
+rules:
+
+  # The rules below aim to reduce noise from the audit logs,
+  # so the majority of the entries will be application related.
+  # Adjust this policy according to your needs.
+  
+  # Don't log requests to readyz / livez
+  - level: None
+    userGroups: ["system:unauthenticated"]
+    nonResourceURLs:
+    - "/readyz"
+    - "/livez"
+
+  # Don't log requests by local-path-storage service account
+  - level: None
+    users: ["system:serviceaccount:local-path-storage:local-path-provisioner-service-account"]
+
+  # Don't log requests by core components
+  - level: None
+    users: [
+      "system:apiserver",
+      "system:kube-controller-manager",
+      "system:kube-scheduler",
+      "system:node:audit-cluster-control-plane", # based on cluster name
+      "system:serviceaccount:kube-system:bootstrap-signer",
+      "system:serviceaccount:kube-system:certificate-controller",
+      "system:serviceaccount:kube-system:clusterrole-aggregation-controller",
+      "system:serviceaccount:kube-system:coredns",
+      "system:serviceaccount:kube-system:daemon-set-controller",
+      "system:serviceaccount:kube-system:deployment-controller",
+      "system:serviceaccount:kube-system:endpoint-controller",
+      "system:serviceaccount:kube-system:endpointslice-controller",
+      "system:serviceaccount:kube-system:kindnet",
+      "system:serviceaccount:kube-system:kube-proxy",
+      "system:serviceaccount:kube-system:node-controller",
+      "system:serviceaccount:kube-system:replicaset-controller",
+      "system:serviceaccount:kube-system:root-ca-cert-publisher",
+      "system:serviceaccount:kube-system:service-account-controller",
+      "system:serviceaccount:kube-system:ttl-controller"
+    ]
+
+  # Don't log coordination leases
+  - level: None
+    resources:
+    - group: "coordination.k8s.io"
+      resources: ["leases"]
+    userGroups: ["system:authenticated"]
+
+  # From this point the policy is based on the Kubernetes audit policy
+  # example: https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/audit/audit-policy.yaml
+
+  # Log pod changes at RequestResponse level
+  - level: RequestResponse
+    resources:
+    - group: ""
+      # Resource "pods" doesn't match requests to any subresource of pods,
+      # which is consistent with the RBAC policy.
+      resources: ["pods"]
+  # Log "pods/log", "pods/status" at Metadata level
+  - level: Metadata
+    resources:
+    - group: ""
+      resources: ["pods/log", "pods/status"]
+
+  # Don't log requests to a configmap called "controller-leader"
+  - level: None
+    resources:
+    - group: ""
+      resources: ["configmaps"]
+      resourceNames: ["controller-leader"]
+
+  # Don't log watch requests by the "system:kube-proxy" on endpoints or services
+  - level: None
+    users: ["system:kube-proxy"]
+    verbs: ["watch"]
+    resources:
+    - group: "" # core API group
+      resources: ["endpoints", "services"]
+
+  # Don't log authenticated requests to certain non-resource URL paths.
+  - level: None
+    userGroups: ["system:authenticated"]
+    nonResourceURLs:
+    - "/api*" # Wildcard matching.
+    - "/version"
+
+  # Log the request body of configmap changes in kube-system.
+  - level: Request
+    resources:
+    - group: "" # core API group
+      resources: ["configmaps"]
+    # This rule only applies to resources in the "kube-system" namespace.
+    # The empty string "" can be used to select non-namespaced resources.
+    namespaces: ["kube-system"]
+
+  # Log configmap and secret changes in all other namespaces at the Metadata level.
+  - level: Metadata
+    resources:
+    - group: "" # core API group
+      resources: ["secrets", "configmaps"]
+
+  # Log all other resources in core and extensions at the Request level.
+  - level: Request
+    resources:
+    - group: "" # core API group
+    - group: "extensions" # Version of group should NOT be included.
+
+  # A catch-all rule to log all other requests at the Metadata level.
+  - level: Metadata
+    # Long-running requests like watches that fall under this rule will not
+    # generate an audit event in RequestReceived.
+    omitStages:
+      - "RequestReceived"
